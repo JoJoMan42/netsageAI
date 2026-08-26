@@ -23,23 +23,27 @@ def test_interface_status():
     GigabitEthernet0/1    192.168.1.1    YES manual    administratively down    down
     GigabitEthernet0/2    192.168.1.2    YES manual    up                      up
     FastEthernet0/1       unassigned     YES unset     down                    down
+    Serial0/0/0           10.1.1.1       YES manual    up                      down
     """
     flags = check_interface_status("CASE-001", output)
     rules = [f.rule for f in flags]
     assert "INTERFACE_ADMIN_DOWN" in rules, "Should detect admin down interface"
-    assert "INTERFACE_LINE_DOWN" in rules, "Should detect line down interface"
+    assert "INTERFACE_DOWN" in rules, "Should detect down down interface"
+    assert "INTERFACE_LINE_DOWN" in rules, "Should detect line protocol down (up/down)"
     print("[PASS] test_interface_status passed")
 
 
 def test_duplicate_ips():
     output = """
     GigabitEthernet0/0    192.168.1.1    YES manual up up
-    GigabitEthernet0/1    192.168.1.1    YES manual up up
+    GigabitEthernet0/1    192.168.1.1    NO manual up up
     %IP-4-DUPADDR: Duplicate IP address 192.168.1.1 on GigabitEthernet0/0, sourced by 0011.2233.4455
+    %DHCP-4-CONFLICT: Address 192.168.1.50 is in conflict.
     """
     flags = check_duplicate_ips("CASE-002", output)
     rules = [f.rule for f in flags]
-    assert "DUPLICATE_IP_DETECTED" in rules or "DUPLICATE_IP_ASSIGNED" in rules
+    assert "DUPLICATE_IP_DETECTED" in rules
+    assert "DUPLICATE_IP_ASSIGNED" in rules
     print("[PASS] test_duplicate_ips passed")
 
 
@@ -49,10 +53,12 @@ def test_subnet_masks():
      ip address 192.168.1.1 255.255.255.0
     interface GigabitEthernet0/1
      ip address 192.168.2.1 255.255.250.0
+    % 192.168.1.0/24 overlaps with GigabitEthernet0/0
     """
     flags = check_subnet_masks("CASE-003", output)
     rules = [f.rule for f in flags]
     assert "INVALID_SUBNET_MASK" in rules, "Should detect invalid subnet mask 255.255.250.0"
+    assert "SUBNET_MASK_MISMATCH" in rules, "Should detect IP overlap warning"
     print("[PASS] test_subnet_masks passed")
 
 
@@ -71,18 +77,22 @@ def test_gateway_mismatch():
 def test_missing_vlans():
     output = """
     %CDP-4-NATIVE_VLAN_MISMATCH: Native VLAN mismatch discovered on GigabitEthernet0/1 (1), with Switch GigabitEthernet0/1 (99).
+    %SPANTREE-2-RECV_PVID_ERR: Received BPDU with inconsistent peer vlan id 10 on GigabitEthernet0/2 VLAN20.
     VLAN 10 inactive
+    VLAN 50 does not exist
     """
     flags = check_missing_vlans("CASE-005", output)
     rules = [f.rule for f in flags]
     assert "NATIVE_VLAN_MISMATCH" in rules
     assert "INACTIVE_VLAN" in rules
+    assert "MISSING_VLAN" in rules
     print("[PASS] test_missing_vlans passed")
 
 
 def test_missing_routes():
     output = """
     % Network not in table
+    % Subnet not in table
     """
     flags = check_missing_routes("CASE-006", output)
     rules = [f.rule for f in flags]

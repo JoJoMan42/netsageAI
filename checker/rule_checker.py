@@ -6,6 +6,7 @@ Operates independently of LLM reasoning to reliably identify common configuratio
 """
 
 from dataclasses import dataclass, field
+import ipaddress
 import re
 from typing import List, Dict, Any, Optional
 
@@ -33,8 +34,8 @@ class CheckResult:
 
 def check_interface_status(case_id: str, output: str) -> List[Flag]:
     """
-    Detects interfaces that are administratively down or line protocol down.
-    Matches lines from outputs like 'show ip interface brief'.
+    Detects interfaces that are administratively down, line protocol down, or disconnected.
+    Matches lines from outputs like 'show ip interface brief' or 'show interfaces'.
     """
     flags = []
     for line in output.splitlines():
@@ -42,6 +43,8 @@ def check_interface_status(case_id: str, output: str) -> List[Flag]:
         if not line_clean:
             continue
         line_lower = line_clean.lower()
+
+        # Check for administratively down
         if "administratively down" in line_lower:
             tokens = line_clean.split()
             iface = tokens[0] if tokens else "Unknown Interface"
@@ -53,13 +56,26 @@ def check_interface_status(case_id: str, output: str) -> List[Flag]:
                     details={"interface": iface, "raw": line_clean}
                 )
             )
+        # Check for status down / protocol down (e.g. 'down down')
         elif re.search(r'\bdown\s+down\b', line_lower):
             tokens = line_clean.split()
             iface = tokens[0] if tokens else "Unknown Interface"
             flags.append(
                 Flag(
+                    rule="INTERFACE_DOWN",
+                    message=f"Interface {iface} status is down and protocol is down.",
+                    severity="medium",
+                    details={"interface": iface, "raw": line_clean}
+                )
+            )
+        # Check for line protocol down with physical up (e.g. 'up down')
+        elif re.search(r'\bup\s+down\b', line_lower):
+            tokens = line_clean.split()
+            iface = tokens[0] if tokens else "Unknown Interface"
+            flags.append(
+                Flag(
                     rule="INTERFACE_LINE_DOWN",
-                    message=f"Interface {iface} line protocol is down.",
+                    message=f"Interface {iface} is up but line protocol is down.",
                     severity="medium",
                     details={"interface": iface, "raw": line_clean}
                 )
@@ -69,28 +85,33 @@ def check_interface_status(case_id: str, output: str) -> List[Flag]:
 
 def check_duplicate_ips(case_id: str, output: str) -> List[Flag]:
     """
-    Detects duplicate IP addresses assigned across interfaces or reported in syslog/ARP messages.
+    Detects duplicate IP addresses assigned across interfaces or reported in syslog/ARP/DHCP messages.
     """
     flags = []
     lines = output.splitlines()
 
+    # 1. Match Cisco duplicate IP syslog and DHCP conflict warnings
     for line in lines:
-        if "%IP-4-DUPADDR" in line or "duplicate ip" in line.lower():
+        line_clean = line.strip()
+        line_lower = line_clean.lower()
+        if "%ip-4-dupaddr" in line_lower or "duplicate ip" in line_lower or "%dhcp-4-conflict" in line_lower:
             flags.append(
                 Flag(
                     rule="DUPLICATE_IP_DETECTED",
-                    message=f"Duplicate IP alert detected: {line.strip()}",
+                    message=f"Duplicate IP alert detected: {line_clean}",
                     severity="high",
-                    details={"raw": line.strip()}
+                    details={"raw": line_clean}
                 )
             )
 
+    # 2. Check for duplicate IP assignments across interfaces in 'show ip interface brief'
     ip_map: Dict[str, List[str]] = {}
     for line in lines:
-        match = re.search(r'([A-Za-z0-9/\.\-]+)\s+((?:\d{1,3}\.){3}\d{1,3})\s+YES', line)
+        # Match lines like: GigabitEthernet0/0 192.168.1.1 YES manual up up
+        match = re.search(r'([A-Za-z0-9/\.\-]+)\s+((?:\d{1,3}\.){3}\d{1,3})\s+(?:YES|NO)\b', line, re.IGNORECASE)
         if match:
             iface, ip = match.group(1), match.group(2)
-            if ip != "0.0.0.0" and ip != "127.0.0.1":
+            if ip not in ("0.0.0.0", "127.0.0.1", "255.255.255.255"):
                 if ip in ip_map:
                     ip_map[ip].append(iface)
                 else:
@@ -112,38 +133,40 @@ def check_duplicate_ips(case_id: str, output: str) -> List[Flag]:
 
 def check_subnet_masks(case_id: str, output: str) -> List[Flag]:
     """
-    Detects subnet mask mismatches or invalid netmask configurations.
+    Detects subnet mask mismatches, IP overlap errors, or invalid netmask configurations.
     """
     flags = []
     lines = output.splitlines()
 
-    valid_masks = {
-        "255.0.0.0", "255.128.0.0", "255.192.0.0", "255.224.0.0", "255.240.0.0", "255.248.0.0", "255.252.0.0", "255.254.0.0",
-        "255.255.0.0", "255.255.128.0", "255.255.192.0", "255.255.224.0", "255.255.240.0", "255.255.248.0", "255.255.252.0", "255.255.254.0",
-        "255.255.255.0", "255.255.255.128", "255.255.255.192", "255.255.255.224", "255.255.255.240", "255.255.255.248", "255.255.255.252", "255.255.255.254", "255.255.255.255", "0.0.0.0"
-    }
-
     for line in lines:
-        line_lower = line.lower()
-        if "bad mask" in line_lower or "subnet mask mismatch" in line_lower:
+        line_clean = line.strip()
+        line_lower = line_clean.lower()
+
+        # Check for explicit Cisco overlap or bad mask error messages
+        if any(err in line_lower for err in ("bad mask", "subnet mask mismatch", "overlaps with", "% ip address overlap")):
             flags.append(
                 Flag(
                     rule="SUBNET_MASK_MISMATCH",
-                    message=f"Subnet mask mismatch indicated: {line.strip()}",
+                    message=f"Subnet mask/overlap issue indicated: {line_clean}",
                     severity="high",
-                    details={"raw": line.strip()}
+                    details={"raw": line_clean}
                 )
             )
+
+        # Parse 'ip address <ip> <mask>' statements
         match = re.search(r'ip address\s+((?:\d{1,3}\.){3}\d{1,3})\s+((?:\d{1,3}\.){3}\d{1,3})', line, re.IGNORECASE)
         if match:
-            ip, mask = match.group(1), match.group(2)
-            if mask not in valid_masks:
+            ip_str, mask_str = match.group(1), match.group(2)
+            try:
+                # Use standard library ipaddress to validate subnet mask
+                ipaddress.IPv4Network(f"{ip_str}/{mask_str}", strict=False)
+            except ValueError:
                 flags.append(
                     Flag(
                         rule="INVALID_SUBNET_MASK",
-                        message=f"Invalid subnet mask {mask} configured for IP {ip}.",
+                        message=f"Invalid subnet mask {mask_str} configured for IP {ip_str}.",
                         severity="high",
-                        details={"ip": ip, "mask": mask}
+                        details={"ip": ip_str, "mask": mask_str}
                     )
                 )
 
@@ -158,23 +181,24 @@ def check_gateway_mismatch(case_id: str, output: str) -> List[Flag]:
     lines = output.splitlines()
 
     for line in lines:
-        line_lower = line.lower()
+        line_clean = line.strip()
+        line_lower = line_clean.lower()
         if "gateway of last resort is not set" in line_lower:
             flags.append(
                 Flag(
                     rule="NO_GATEWAY_SET",
                     message="Gateway of last resort is not set.",
                     severity="medium",
-                    details={"raw": line.strip()}
+                    details={"raw": line_clean}
                 )
             )
         elif "gateway mismatch" in line_lower or "wrong default gateway" in line_lower:
             flags.append(
                 Flag(
                     rule="GATEWAY_MISMATCH",
-                    message=f"Gateway mismatch detected: {line.strip()}",
+                    message=f"Gateway mismatch detected: {line_clean}",
                     severity="high",
-                    details={"raw": line.strip()}
+                    details={"raw": line_clean}
                 )
             )
 
@@ -189,32 +213,33 @@ def check_missing_vlans(case_id: str, output: str) -> List[Flag]:
     lines = output.splitlines()
 
     for line in lines:
-        line_lower = line.lower()
-        if "vlan id" in line_lower and "not found" in line_lower:
+        line_clean = line.strip()
+        line_lower = line_clean.lower()
+        if ("vlan id" in line_lower and "not found" in line_lower) or ("vlan" in line_lower and "does not exist" in line_lower):
             flags.append(
                 Flag(
                     rule="MISSING_VLAN",
-                    message=f"VLAN configuration missing: {line.strip()}",
+                    message=f"VLAN configuration missing: {line_clean}",
                     severity="high",
-                    details={"raw": line.strip()}
+                    details={"raw": line_clean}
                 )
             )
         elif "vlan" in line_lower and "inactive" in line_lower:
             flags.append(
                 Flag(
                     rule="INACTIVE_VLAN",
-                    message=f"VLAN is inactive: {line.strip()}",
+                    message=f"VLAN is inactive: {line_clean}",
                     severity="high",
-                    details={"raw": line.strip()}
+                    details={"raw": line_clean}
                 )
             )
-        elif "%native_vlan_mismatch" in line_lower or "native vlan mismatch" in line_lower:
+        elif "%cdp-4-native_vlan_mismatch" in line_lower or "%spantree-2-recv_pvid_err" in line_lower or "native vlan mismatch" in line_lower:
             flags.append(
                 Flag(
                     rule="NATIVE_VLAN_MISMATCH",
-                    message=f"Native VLAN mismatch detected: {line.strip()}",
+                    message=f"Native VLAN mismatch detected: {line_clean}",
                     severity="high",
-                    details={"raw": line.strip()}
+                    details={"raw": line_clean}
                 )
             )
 
@@ -229,14 +254,15 @@ def check_missing_routes(case_id: str, output: str) -> List[Flag]:
     lines = output.splitlines()
 
     for line in lines:
-        line_lower = line.lower()
-        if "% network not in table" in line_lower or "route not found" in line_lower:
+        line_clean = line.strip()
+        line_lower = line_clean.lower()
+        if "% network not in table" in line_lower or "route not found" in line_lower or "% subnet not in table" in line_lower:
             flags.append(
                 Flag(
                     rule="MISSING_ROUTE",
-                    message=f"Route missing from routing table: {line.strip()}",
+                    message=f"Route missing from routing table: {line_clean}",
                     severity="high",
-                    details={"raw": line.strip()}
+                    details={"raw": line_clean}
                 )
             )
 
@@ -267,7 +293,7 @@ def run_all_checks(case_id: str, show_output: str) -> CheckResult:
 
 
 if __name__ == "__main__":
-    # Simple self-test demo
+    # Self-test demonstration output
     sample_output = """
     GigabitEthernet0/1    192.168.1.1    YES manual    administratively down    down
     GigabitEthernet0/2    192.168.1.1    YES manual    up                      up
