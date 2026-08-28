@@ -1,0 +1,6 @@
+# Core dashboard & visualization
+matplotlib>=3.7
+
+# AI SDKs (optional - diagnose.py also has built-in REST fallback for Gemini)
+google-genai>=1.0.0
+openai>=1.0.0

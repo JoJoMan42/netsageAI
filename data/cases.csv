@@ -1,0 +1,371 @@
+case_id,issue_type,symptom,topology_note,show_output,expected_fault,osi_layer,concept_tag,severity
+CASE-001,VLAN,"PC1 on VLAN 10 cannot reach other VLAN 10 hosts on the same switch.","PC1 (Fa0/1) -> SW1 -> PC2 (Fa0/2)","SW1# show vlan brief
+VLAN Name                             Status    Ports
+---- -------------------------------- --------- -------------------------------
+1    default                          active    Fa0/1, Fa0/3-Fa0/24, Gi0/1-Gi0/2
+10   Engineering                      active    Fa0/2
+20   Sales                            active
+SW1# show interfaces Fa0/1 switchport
+Name: Fa0/1
+Switchport: Enabled
+Administrative Mode: dynamic auto
+Operational Mode: static access
+Administrative Trunking Encapsulation: negotiate
+Negotiation of Trunking: On
+Access Mode VLAN: 1 (default)","PC1 is assigned to VLAN 1 (default) instead of VLAN 10.",Layer 2,VLAN,Medium
+CASE-002,VLAN,"PC3 cannot reach any other hosts. Switch shows VLAN 30 but no ports are active.","PC3 (Fa0/5) -> SW1","SW1# show vlan brief
+VLAN Name                             Status    Ports
+---- -------------------------------- --------- -------------------------------
+1    default                          active    Fa0/1-Fa0/4, Fa0/6-Fa0/24
+10   Engineering                      active
+20   Sales                            active
+30   Marketing                        active    Fa0/5
+SW1# show interfaces Fa0/5 switchport
+Name: Fa0/5
+Switchport: Enabled
+Administrative Mode: static access
+Operational Mode: static access
+Access Mode VLAN: 30 (Marketing)
+SW1# show vlan id 30
+VLAN Name                             Status    Ports
+---- -------------------------------- --------- -------------------------------
+30   Marketing                        active    Fa0/5","VLAN 30 exists and PC3 is correctly assigned, but no other hosts are in VLAN 30 and no inter-VLAN routing is configured. VLAN 30 is isolated.",Layer 2,VLAN,Medium
+CASE-003,VLAN,"PC1 in VLAN 10 on SW1 cannot reach PC2 in VLAN 10 on SW2 across the trunk link.","PC1 (Fa0/1 VLAN 10) -> SW1 (Gi0/1 trunk) -> SW2 (Gi0/1 trunk) -> PC2 (Fa0/1 VLAN 10)","SW1# show interfaces trunk
+Port        Mode         Encapsulation  Status        Native vlan
+Gi0/1       on           802.1q         trunking      1
+
+Port        Vlans allowed on trunk
+Gi0/1       1,20,30
+
+Port        Vlans allowed and active in management domain
+Gi0/1       1,20,30
+
+SW2# show interfaces trunk
+Port        Mode         Encapsulation  Status        Native vlan
+Gi0/1       on           802.1q         trunking      1
+
+Port        Vlans allowed on trunk
+Gi0/1       1-4094","Trunk on SW1 does not allow VLAN 10. VLAN 10 traffic is filtered on SW1 trunk port Gi0/1.",Layer 2,VLAN,High
+CASE-004,VLAN,"Hosts on both sides of the trunk can communicate within VLANs, but management traffic and DHCP are unreliable.","SW1 (Gi0/1 trunk) -> SW2 (Gi0/1 trunk)","SW1# show interfaces trunk
+Port        Mode         Encapsulation  Status        Native vlan
+Gi0/1       on           802.1q         trunking      1
+
+SW2# show interfaces trunk
+Port        Mode         Encapsulation  Status        Native vlan
+Gi0/1       on           802.1q         trunking      99
+
+%CDP-4-NATIVE_VLAN_MISMATCH: Native VLAN mismatch discovered on GigabitEthernet0/1 (1), with Switch GigabitEthernet0/1 (99).","Native VLAN mismatch between SW1 (native VLAN 1) and SW2 (native VLAN 99).",Layer 2,VLAN,High
+CASE-005,VLAN,"PC1 connected to Fa0/3 on SW1 is supposed to be on VLAN 10 access port but trunk negotiations are occurring.","PC1 (Fa0/3) -> SW1","SW1# show interfaces Fa0/3 switchport
+Name: Fa0/3
+Switchport: Enabled
+Administrative Mode: dynamic desirable
+Operational Mode: trunk
+Administrative Trunking Encapsulation: dot1q
+Negotiation of Trunking: On
+Access Mode VLAN: 10 (Engineering)
+Trunking Native Mode VLAN: 1 (default)
+Trunking VLANs Enabled: ALL","Access port Fa0/3 is configured as dynamic desirable and has negotiated into trunk mode instead of access mode.",Layer 2,VLAN,Medium
+CASE-006,Gateway,"PC1 (192.168.1.10/24) can ping other hosts on the 192.168.1.0/24 subnet but cannot reach the internet or any remote network.","PC1 -> SW1 -> R1 (192.168.1.1)","PC1> ipconfig
+IP Address: 192.168.1.10
+Subnet Mask: 255.255.255.0
+Default Gateway: 192.168.1.254
+
+R1# show ip interface brief
+Interface              IP-Address      OK? Method Status                Protocol
+GigabitEthernet0/0     192.168.1.1     YES manual up                    up","PC1 default gateway is set to 192.168.1.254 but the router interface is 192.168.1.1. Gateway mismatch.",Layer 3,Gateway,High
+CASE-007,Gateway,"Two PCs on the same subnet cannot communicate. ARP fails between them.","PC1 (Fa0/1) -> SW1 -> PC2 (Fa0/2)","PC1> ipconfig
+IP Address: 192.168.1.10
+Subnet Mask: 255.255.255.0
+
+PC2> ipconfig
+IP Address: 192.168.1.20
+Subnet Mask: 255.255.0.0
+
+PC2> ping 192.168.1.10
+Request timed out.","PC2 has wrong subnet mask (255.255.0.0 instead of 255.255.255.0). Although both IPs are in the same /24, PC2 calculates a different broadcast domain.",Layer 3,Subnet Mask,Medium
+CASE-008,Gateway,"Network shows intermittent connectivity issues. Some devices lose connection randomly.","PC1 (Fa0/1) -> SW1 -> R1","R1# show ip interface brief
+Interface              IP-Address      OK? Method Status                Protocol
+GigabitEthernet0/0     192.168.1.1     YES manual up                    up
+GigabitEthernet0/1     10.0.0.1        YES manual up                    up
+
+%IP-4-DUPADDR: Duplicate IP address 192.168.1.1 on GigabitEthernet0/0, sourced by 00A1.B2C3.D4E5","Duplicate IP address 192.168.1.1 detected. Another device on the network is using the same IP as R1 GigabitEthernet0/0.",Layer 3,Duplicate IP,High
+CASE-009,Gateway,"PC1 cannot ping its default gateway R1. All cables are connected.","PC1 -> SW1 -> R1 (Gi0/0)","R1# show ip interface brief
+Interface              IP-Address      OK? Method Status                Protocol
+GigabitEthernet0/0     192.168.1.1     YES manual administratively down down
+GigabitEthernet0/1     10.0.0.1        YES manual up                    up","Router interface GigabitEthernet0/0 is administratively down (shutdown). Interface needs to be enabled with no shutdown.",Layer 1,Interface Down,High
+CASE-010,DHCP,"PC1 is not receiving an IP address from DHCP. It shows an APIPA address (169.254.x.x).","PC1 -> SW1 -> R1 (DHCP Server)","PC1> ipconfig
+IP Address: 169.254.10.5
+Subnet Mask: 255.255.0.0
+Default Gateway: 0.0.0.0
+
+R1# show ip dhcp pool
+Pool LAN_POOL:
+ Network: 10.0.0.0/24
+ Default Router: 10.0.0.1
+ DNS Server: 8.8.8.8
+ Lease: 1 day
+
+R1# show ip interface brief
+Interface              IP-Address      OK? Method Status                Protocol
+GigabitEthernet0/0     192.168.1.1     YES manual up                    up","DHCP pool has wrong network (10.0.0.0/24) that does not match the interface subnet (192.168.1.0/24). DHCP offers will not be sent to the correct subnet.",Layer 7,DHCP,High
+CASE-011,DHCP,"PCs get IP addresses from DHCP but cannot reach the internet. DNS works locally.","PC1 -> SW1 -> R1 (DHCP Server) -> ISP","PC1> ipconfig
+IP Address: 192.168.1.50
+Subnet Mask: 255.255.255.0
+Default Gateway: 192.168.1.100
+
+R1# show ip dhcp pool
+Pool LAN_POOL:
+ Network: 192.168.1.0/24
+ Default Router: 192.168.1.100
+ DNS Server: 8.8.8.8
+
+R1# show ip interface brief
+Interface              IP-Address      OK? Method Status                Protocol
+GigabitEthernet0/0     192.168.1.1     YES manual up                    up","DHCP pool specifies default router as 192.168.1.100, but R1 LAN interface is 192.168.1.1. Clients get wrong gateway from DHCP.",Layer 3,DHCP,High
+CASE-012,DHCP,"New PCs connected to the network are not receiving DHCP addresses. Existing PCs still work.","PC-new -> SW1 -> R1 (DHCP Server)","PC-new> ipconfig
+IP Address: 169.254.45.12
+Subnet Mask: 255.255.0.0
+Default Gateway: 0.0.0.0
+
+R1# show ip dhcp pool
+Pool LAN_POOL:
+ Network: 192.168.1.0/24
+ Default Router: 192.168.1.1
+
+R1# show ip dhcp binding
+IP address      Client-ID            Lease expiration
+192.168.1.2     0100.1111.2222.33    Aug 29 2026
+192.168.1.3     0100.1111.2222.44    Aug 29 2026
+192.168.1.4     0100.1111.2222.55    Aug 29 2026
+192.168.1.5     0100.1111.2222.66    Aug 29 2026
+192.168.1.6     0100.1111.2222.77    Aug 29 2026
+
+R1# show ip dhcp server statistics
+Total: 5  Allocated: 5  Free: 0","DHCP address pool exhausted. All 5 available addresses are allocated and no free addresses remain for new clients.",Layer 7,DHCP,Medium
+CASE-013,DHCP,"PC1 on VLAN 10 is not getting DHCP. The DHCP server is on a different VLAN behind R1.","PC1 (VLAN 10) -> SW1 -> R1 (VLAN 1 - DHCP Server)","R1# show running-config | section interface
+interface GigabitEthernet0/0.1
+ encapsulation dot1Q 1
+ ip address 192.168.1.1 255.255.255.0
+interface GigabitEthernet0/0.10
+ encapsulation dot1Q 10
+ ip address 10.10.10.1 255.255.255.0
+
+R1# show ip dhcp pool
+Pool VLAN10_POOL:
+ Network: 10.10.10.0/24
+ Default Router: 10.10.10.1
+
+R1# show running-config | include ip helper
+(no output)","Missing ip helper-address on sub-interface Gi0/0.10 to relay DHCP requests to the DHCP server. Without DHCP relay, broadcasts from VLAN 10 do not reach the DHCP service.",Layer 7,DHCP,High
+CASE-014,DNS,"PC1 can ping IP addresses (8.8.8.8) but cannot browse websites by name.","PC1 -> SW1 -> R1 -> Internet","PC1> ipconfig
+IP Address: 192.168.1.10
+Subnet Mask: 255.255.255.0
+Default Gateway: 192.168.1.1
+DNS Server: 10.10.10.50
+
+PC1> ping 8.8.8.8
+Reply from 8.8.8.8: bytes=32 time=12ms TTL=55
+
+PC1> ping 10.10.10.50
+Request timed out.
+
+PC1> nslookup google.com
+Server: Unknown
+Address: 10.10.10.50
+DNS request timed out.","Client DNS server is set to 10.10.10.50 which is unreachable. DNS server IP is wrong or the server is offline.",Layer 7,DNS,Medium
+CASE-015,DNS,"PC1 can ping the DNS server by IP but DNS lookups still fail. The server responds but has no records.","PC1 -> SW1 -> R1 -> DNS Server (192.168.1.5)","PC1> ipconfig
+IP Address: 192.168.1.10
+Subnet Mask: 255.255.255.0
+DNS Server: 192.168.1.5
+
+PC1> ping 192.168.1.5
+Reply from 192.168.1.5: bytes=32 time=1ms TTL=128
+
+PC1> nslookup webserver.lab.local
+Server: 192.168.1.5
+Address: 192.168.1.5
+*** 192.168.1.5 can't find webserver.lab.local: Non-existent domain","DNS server is reachable but does not have an A record for webserver.lab.local. Missing DNS record on the server.",Layer 7,DNS,Low
+CASE-016,DNS,"PC1 can reach external sites but internal hostname resolution fails. Uses wrong DNS.","PC1 -> SW1 -> R1 -> Internal DNS (192.168.1.5) + External","PC1> ipconfig
+IP Address: 192.168.1.10
+Subnet Mask: 255.255.255.0
+DNS Server: 8.8.8.8
+
+PC1> nslookup intranet.corp.local
+Server: google-public-dns-a.google.com
+Address: 8.8.8.8
+*** 8.8.8.8 can't find intranet.corp.local: Non-existent domain
+
+PC1> nslookup intranet.corp.local 192.168.1.5
+Server: 192.168.1.5
+Address: 192.168.1.5
+Name: intranet.corp.local
+Address: 192.168.1.200","Client uses external DNS (8.8.8.8) instead of internal DNS server (192.168.1.5). External DNS cannot resolve internal hostnames.",Layer 7,DNS,Low
+CASE-017,Routing,"PC1 can reach R1 but cannot reach Server1 on a remote network behind R2.","PC1 (192.168.1.0/24) -> R1 -> R2 -> Server1 (172.16.1.0/24)","R1# show ip route
+Codes: C - connected, S - static
+Gateway of last resort is not set
+
+C    192.168.1.0/24 is directly connected, GigabitEthernet0/0
+C    10.0.0.0/30 is directly connected, Serial0/0/0
+
+R1# ping 172.16.1.100
+Type escape sequence to abort.
+Sending 5, 100-byte ICMP Echos to 172.16.1.100, timeout is 2 seconds:
+.....
+Success rate is 0 percent (0/5)","Missing static route on R1 to reach 172.16.1.0/24 network. R1 has no route to the destination and no default gateway.",Layer 3,Static Routing,High
+CASE-018,Routing,"PC1 cannot reach Server1. R1 has a static route but pings still fail.","PC1 (192.168.1.0/24) -> R1 (S0/0/0) -> R2 (S0/0/0) -> Server1 (172.16.1.0/24)","R1# show ip route
+Codes: C - connected, S - static
+Gateway of last resort is not set
+
+C    192.168.1.0/24 is directly connected, GigabitEthernet0/0
+C    10.0.0.0/30 is directly connected, Serial0/0/0
+S    172.16.1.0/24 [1/0] via 10.0.0.5
+
+R1# show ip interface brief
+Interface              IP-Address      OK? Method Status                Protocol
+Serial0/0/0            10.0.0.1        YES manual up                    up
+
+R2# show ip interface brief
+Interface              IP-Address      OK? Method Status                Protocol
+Serial0/0/0            10.0.0.2        YES manual up                    up","Static route on R1 points to next-hop 10.0.0.5, but R2 Serial0/0/0 is 10.0.0.2. Wrong next-hop address in the static route.",Layer 3,Static Routing,High
+CASE-019,Routing,"PC1 can reach R1 and R2 WAN interface, but not Server1 on R2 LAN.","PC1 (192.168.1.0/24) -> R1 -> R2 -> Server1 (172.16.1.0/24)","R1# show ip route
+Codes: C - connected, S - static
+C    192.168.1.0/24 is directly connected, GigabitEthernet0/0
+C    10.0.0.0/30 is directly connected, Serial0/0/0
+S    172.16.0.0/24 [1/0] via 10.0.0.2
+
+R1# ping 172.16.1.100
+.....
+Success rate is 0 percent (0/5)
+
+R2# show ip interface brief
+Interface              IP-Address      OK? Method Status                Protocol
+GigabitEthernet0/0     172.16.1.1      YES manual up                    up
+Serial0/0/0            10.0.0.2        YES manual up                    up","Static route on R1 points to 172.16.0.0/24 but Server1 is on 172.16.1.0/24. Wrong destination network in the static route (off by one octet).",Layer 3,Static Routing,High
+CASE-020,Routing,"PC1 cannot reach any remote network. R1 serial interface shows down.","PC1 -> R1 (S0/0/0) -> R2","R1# show ip interface brief
+Interface              IP-Address      OK? Method Status                Protocol
+GigabitEthernet0/0     192.168.1.1     YES manual up                    up
+Serial0/0/0            10.0.0.1        YES manual down                  down
+
+R1# show interfaces Serial0/0/0
+Serial0/0/0 is down, line protocol is down
+  Hardware is WIC 2T
+  Internet address is 10.0.0.1/30
+  MTU 1500 bytes, BW 1544 Kbit/sec","Router serial interface S0/0/0 is down/down. Physical layer issue - cable disconnected or clock rate not configured on DCE side.",Layer 1,Interface Down,High
+CASE-021,Routing,"PC1 can ping Server1 from R1, but Server1 cannot ping back to PC1. One-way communication.","PC1 (192.168.1.0/24) -> R1 -> R2 -> Server1 (172.16.1.0/24)","R1# show ip route
+C    192.168.1.0/24 is directly connected, GigabitEthernet0/0
+C    10.0.0.0/30 is directly connected, Serial0/0/0
+S    172.16.1.0/24 [1/0] via 10.0.0.2
+
+R2# show ip route
+C    172.16.1.0/24 is directly connected, GigabitEthernet0/0
+C    10.0.0.0/30 is directly connected, Serial0/0/0
+
+R1# ping 172.16.1.100 source 192.168.1.1
+.....
+Success rate is 0 percent (0/5)","Return route missing on R2. R2 has no route back to 192.168.1.0/24 so reply packets are dropped.",Layer 3,Static Routing,High
+CASE-022,ACL,"PC1 (192.168.1.10) cannot reach Server1 (172.16.1.100) on port 80, but other PCs can.","PC1 -> SW1 -> R1 -> Server1","R1# show access-lists
+Extended IP access list 101
+    10 deny tcp host 192.168.1.10 host 172.16.1.100 eq www (25 matches)
+    20 permit ip any any (1sobject matches)
+
+R1# show ip interface GigabitEthernet0/0
+GigabitEthernet0/0 is up, line protocol is up
+  Inbound access list is 101
+  Outgoing access list is not set","ACL 101 explicitly denies TCP traffic from host 192.168.1.10 to Server1 on port 80 (www). The ACL is applied inbound on Gi0/0.",Layer 4,ACL,High
+CASE-023,ACL,"All PCs on 192.168.1.0/24 should be able to reach Server1, but none can. ACL is too restrictive.","PCs (192.168.1.0/24) -> R1 -> Server1 (172.16.1.0/24)","R1# show access-lists
+Extended IP access list 110
+    10 permit ip 192.168.10.0 0.0.0.255 host 172.16.1.100 (0 matches)
+    20 deny ip any any (342 matches)
+
+R1# show ip interface GigabitEthernet0/0
+GigabitEthernet0/0 is up, line protocol is up
+  Inbound access list is 110
+  Outgoing access list is not set","ACL 110 permit statement uses wrong source subnet 192.168.10.0/24 instead of 192.168.1.0/24. No traffic matches the permit, so the implicit deny drops everything.",Layer 4,ACL,High
+CASE-024,ACL,"PC1 can send requests to Server1 but replies never come back. Outbound ACL blocks return traffic.","PC1 (192.168.1.10) -> R1 -> Server1 (172.16.1.100)","R1# show access-lists
+Extended IP access list 120
+    10 permit ip 192.168.1.0 0.0.0.255 172.16.1.0 0.0.0.255 (45 matches)
+    20 deny ip any any
+
+R1# show ip interface GigabitEthernet0/1
+GigabitEthernet0/1 is up, line protocol is up
+  Inbound access list is not set
+  Outgoing access list is 120","ACL 120 is applied outbound on Gi0/1 (toward Server1). It permits traffic FROM 192.168.1.0/24 TO 172.16.1.0/24, but return traffic (FROM 172.16.1.0 TO 192.168.1.0) does not match the permit and hits implicit deny. ACL applied in wrong direction or missing reverse permit.",Layer 4,ACL,High
+CASE-025,ACL,"No hosts on any subnet can access Server1. ACL has only deny statements.","PCs -> R1 -> Server1 (172.16.1.100)","R1# show access-lists
+Extended IP access list 130
+    10 deny tcp any host 172.16.1.100 eq telnet (0 matches)
+    20 deny tcp any host 172.16.1.100 eq ftp (0 matches)
+
+R1# show ip interface GigabitEthernet0/0
+GigabitEthernet0/0 is up, line protocol is up
+  Inbound access list is 130
+  Outgoing access list is not set","ACL 130 only has deny statements for telnet and ftp. There is no permit statement at the end. The implicit deny ip any any at the end of every ACL blocks all other traffic including HTTP and ICMP.",Layer 4,ACL,Medium
+CASE-026,NAT,"Internal hosts (192.168.1.0/24) cannot reach the internet. NAT is configured but not working.","PCs (192.168.1.0/24) -> R1 (NAT) -> ISP","R1# show running-config | section interface
+interface GigabitEthernet0/0
+ ip address 192.168.1.1 255.255.255.0
+interface GigabitEthernet0/1
+ ip address 203.0.113.1 255.255.255.0
+ ip nat outside
+
+R1# show running-config | include nat
+ip nat outside
+ip nat inside source list 1 interface GigabitEthernet0/1 overload
+access-list 1 permit 192.168.1.0 0.0.0.255
+
+R1# show ip nat translations
+(empty)","Missing ip nat inside on GigabitEthernet0/0. The inside interface is not marked for NAT so translations never occur.",Layer 3,NAT,High
+CASE-027,NAT,"NAT is configured but only some internal hosts get translated. Others cannot reach the internet.","PCs (192.168.1.0/24 and 10.10.10.0/24) -> R1 (NAT) -> ISP","R1# show running-config | include nat
+ip nat inside source list 1 interface GigabitEthernet0/1 overload
+
+R1# show access-lists
+Standard IP access list 1
+    10 permit 192.168.1.0 0.0.0.255
+
+R1# show ip nat translations
+Pro Inside global      Inside local       Outside local      Outside global
+tcp 203.0.113.1:1025   192.168.1.10:1025  8.8.8.8:80         8.8.8.8:80","NAT ACL 1 only permits 192.168.1.0/24. The 10.10.10.0/24 subnet is not included in the NAT access list so those hosts are not translated.",Layer 3,NAT,Medium
+CASE-028,NAT,"Internal hosts cannot browse the internet. NAT translations show but packets are not being overloaded.","PCs (192.168.1.0/24) -> R1 (NAT) -> ISP","R1# show running-config | include nat
+ip nat inside source list 1 interface GigabitEthernet0/1
+
+R1# show access-lists
+Standard IP access list 1
+    10 permit 192.168.1.0 0.0.0.255
+
+R1# show ip nat statistics
+Total active translations: 1
+Outside interfaces: GigabitEthernet0/1
+Inside interfaces: GigabitEthernet0/0
+Hits: 5  Misses: 342","NAT overload (PAT) keyword is missing. Without 'overload', only one inside host can be translated at a time using static NAT behavior.",Layer 3,NAT,Medium
+CASE-029,Wireless,"Wireless client connects to SSID 'Guest-WiFi' but gets an IP from the wrong VLAN. Can reach internal servers instead of only internet.","Laptop -> WLC/AP (Guest-WiFi) -> SW1 -> R1","WLC# show wlan summary
+WLAN ID  SSID          Status    Interface
+1        Corp-WiFi     Enabled   vlan10
+2        Guest-WiFi    Enabled   vlan10
+
+SW1# show vlan brief
+VLAN Name                             Status    Ports
+10   Corporate                        active    Fa0/1-Fa0/12
+20   Guest                            active    Fa0/13-Fa0/24","SSID Guest-WiFi is mapped to VLAN 10 (Corporate) instead of VLAN 20 (Guest). Wireless guests get corporate network access.",Layer 2,Wireless VLAN,High
+CASE-030,Wireless,"Guest wireless clients can reach internal LAN servers. Network segmentation is not working.","Laptop -> AP (Guest VLAN 20) -> SW1 -> R1 -> Server (VLAN 10)","R1# show ip interface brief
+Interface              IP-Address      OK? Method Status                Protocol
+GigabitEthernet0/0.10  192.168.10.1    YES manual up                    up
+GigabitEthernet0/0.20  192.168.20.1    YES manual up                    up
+
+R1# show access-lists
+(no access lists configured)
+
+Laptop> ping 192.168.10.100
+Reply from 192.168.10.100: bytes=32 time=3ms TTL=127","No ACL is configured between VLAN 20 (Guest) and VLAN 10 (Corporate). Inter-VLAN routing allows guest wireless clients full access to internal LAN.",Layer 3,ACL,High
+CASE-031,Wireless,"Wireless client connects and gets an IP address but cannot reach any gateway. Wrong gateway assigned.","Laptop -> AP (VLAN 20) -> SW1 -> R1","Laptop> ipconfig /all
+IP Address: 192.168.20.50
+Subnet Mask: 255.255.255.0
+Default Gateway: 192.168.20.100
+DHCP Server: 192.168.20.1
+
+R1# show ip interface brief
+Interface              IP-Address      OK? Method Status                Protocol
+GigabitEthernet0/0.20  192.168.20.1    YES manual up                    up
+
+R1# show ip dhcp pool
+Pool WIRELESS_POOL:
+ Network: 192.168.20.0/24
+ Default Router: 192.168.20.100
+ DNS Server: 8.8.8.8","DHCP pool assigns default gateway 192.168.20.100 but the actual router sub-interface for VLAN 20 is 192.168.20.1. Wireless client gets wrong gateway.",Layer 3,DHCP,High
