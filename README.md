@@ -231,13 +231,29 @@ python ai/diagnose.py --live
 python ai/diagnose.py --live --model gemini-1.5-flash --case CASE-001
 ```
 
-### Generate Dashboard
+### Generate Dashboard (Matplotlib PNGs)
 
 ```bash
 python dashboard/dashboard.py
 ```
 
 Charts are saved to `dashboard/charts/`.
+
+### Run the Interactive React Dashboard (Modern Web UI)
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Visit **`http://localhost:5173`** in your browser to access:
+- **Interactive Analytics Hub**: Dynamic Recharts visualizations, KPI metrics, and AI/Human agreement rates.
+- **Case Knowledge Base**: Filterable 31 cases with Cisco CLI syntax inspection and expected root causes.
+- **Deterministic Rule Checker Studio**: Live rule evaluator across all 6 Cisco checks.
+- **AI Diagnostic Studio**: Real-time mock or live Google Gemini 2.5 Flash reasoning with confidence meters and 1-click copyable IOS fix scripts.
+- **Human Review Console**: Interactive Accept/Edit/Reject workflow with live audit logging and CSV export.
+- **Cisco CLI Sandbox**: Playground to troubleshoot custom show command outputs in real-time.
 
 ---
 
